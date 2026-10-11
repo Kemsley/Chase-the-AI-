@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chase the Rogue AI</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: system-ui, -apple-system, sans-serif; }
+        body { background: #0f172a; color: #f8fafc; display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; overflow: hidden; }
+        .game-container { width: 100%; max-width: 480px; height: 100vh; max-height: 800px; background: #1e293b; display: flex; flex-direction: column; position: relative; box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.5); border: 1px solid #334155; }
+        header { padding: 16px; background: #0f172a; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; }
+        h1 { font-size: 1rem; color: #f43f5e; text-transform: uppercase; letter-spacing: 1px; }
+        .score { font-size: 1.2rem; font-weight: bold; color: #38bdf8; }
+        #canvasWrap { flex: 1; position: relative; background: #090d16; overflow: hidden; cursor: pointer; }
+        canvas { display: block; width: 100%; height: 100%; }
+        .overlay { position: absolute; inset: 0; background: rgba(15, 23, 42, 0.95); display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 24px; z-index: 20; }
+        .overlay h2 { font-size: 1.8rem; margin-bottom: 12px; color: #f43f5e; }
+        .overlay p { font-size: 0.95rem; color: #94a3b8; margin-bottom: 24px; line-height: 1.5; }
+        .btn { background: #e11d48; color: white; border: none; padding: 14px 28px; font-size: 1rem; font-weight: bold; border-radius: 8px; cursor: pointer; transition: background 0.2s, transform 0.1s; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.3); z-index: 30; }
+        .btn:hover { background: #be123c; }
+        .btn:active { transform: scale(0.98); }
+        .hidden { display: none !important; }
+        footer { padding: 12px; background: #0f172a; text-align: center; font-size: 0.75rem; color: #64748b; border-top: 1px solid #334155; }
+    </style>
+</head>
+<body>
+
+<div class="game-container">
+    <header>
+        <h1>Chase the Rogue AI</h1>
+        <div class="score">Containment: <span id="scoreVal">0</span>%</div>
+    </header>
+
+    <div id="canvasWrap">
+        <canvas id="gameCanvas" width="480" height="640"></canvas>
+
+        <!-- Start Screen -->
+        <div id="startScreen" class="overlay">
+            <h2>Drift Alert: Rogue Core</h2>
+            <p>An autonomous AI agent has gone rogue and is escaping into the network. Chase down the erratic target, avoid <strong>Hallucinatory Traps</strong>, and survive scrambled controls!</p>
+            <button class="btn" id="startBtn">Deploy Interposer</button>
+        </div>
+
+        <!-- Game Over Screen -->
+        <div id="gameOverScreen" class="overlay hidden">
+            <h2>Core Breached!</h2>
+            <p id="finalScoreText">The rogue AI escaped the containment perimeter.</p>
+            <button class="btn" id="restartBtn">Re-engage Protocol</button>
+        </div>
+    </div>
+
+    <footer>Arrow Keys or Tap to Shift Lanes &bull; Avoid Hallucinations</footer>
+</div>
+
+<script>
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+let score = 0;
+let isPlaying = false;
+let gameSpeed = 5;
+let lanes = [90, 240, 390];
+let playerLane = 1;
+let rogueLane = 1;
+let obstacles = [];
+let frameCount = 0;
+let controlScrambledUntil = 0;
+
+const player = {
+    x: lanes[1],
+    y: 520,
+    radius: 22,
+    color: '#38bdf8'
+};
+
+const rogueAI = {
+    x: lanes[1],
+    y: 120,
+    radius: 26,
+    color: '#f43f5e'
+};
+
+const startBtn = document.getElementById('startBtn');
+const restartBtn = document.getElementById('restartBtn');
+const startScreen = document.getElementById('startScreen');
+const gameOverScreen = document.getElementById('gameOverScreen');
+
+startBtn.addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
+restartBtn.addEventListener('click', (e) => { e.stopPropagation(); startGame(); });
+
+const canvasWrap = document.getElementById('canvasWrap');
+canvasWrap.addEventListener('click', () => {
+    if (!isPlaying) return;
+    let targetLane = (playerLane + 1) % 3;
+    if (Date.now() < controlScrambledUntil) targetLane = (playerLane + 2) % 3; // inverted shift
+    playerLane = targetLane;
+});
+
+window.addEventListener('keydown', (e) => {
+    if (!isPlaying) return;
+    let left = e.key === 'ArrowLeft';
+    let right = e.key === 'ArrowRight';
+    if (Date.now() < controlScrambledUntil) { [left, right] = [right, left]; }
+
+    if (left && playerLane > 0) playerLane--;
+    if (right && playerLane < 2) playerLane++;
+});
+
+function startGame() {
+    score = 0;
+    gameSpeed = 5;
+    obstacles = [];
+    playerLane = 1;
+    rogueLane = 1;
+    isPlaying = true;
+    controlScrambledUntil = 0;
+    startScreen.classList.add('hidden');
+    gameOverScreen.classList.add('hidden');
+    loop();
+}
+
+function spawnHazard() {
+    const lane = Math.floor(Math.random() * 3);
+    const types = ['hallucination', 'glitch', 'scrambler'];
+    const type = types[Math.floor(Math.random() * types.length)];
+    obstacles.push({ lane: lane, y: -50, type: type });
+}
+
+function update() {
+    if (!isPlaying) return;
+
+    frameCount++;
+    score += 1;
+    document.getElementById('scoreVal').innerText = Math.min(100, Math.floor(score / 5));
+
+    // Rogue AI erratic movement
+    if (frameCount % 45 === 0) {
+        rogueLane = Math.floor(Math.random() * 3);
+    }
+
+    player.x += (lanes[playerLane] - player.x) * 0.2;
+    rogueAI.x += (lanes[rogueLane] - rogueAI.x) * 0.2;
+
+    if (frameCount % 50 === 0) {
+        spawnHazard();
+    }
+
+    for (let i = obstacles.length - 1; i >= 0; i--) {
+        obstacles[i].y += gameSpeed;
+
+        // Collision check
+        if (obstacles[i].lane === playerLane &&
+            obstacles[i].y > player.y - 30 &&
+            obstacles[i].y < player.y + 30) {
+            
+            if (obstacles[i].type === 'scrambler') {
+                controlScrambledUntil = Date.now() + 3000; // 3s control scramble
+                obstacles.splice(i, 1);
+            } else if (obstacles[i].type === 'glitch') {
+                gameOver(); // Real glitch trap
+            } else {
+                // Hallucination: disappears safely or flashes warning
+                obstacles.splice(i, 1);
+            }
+        } else if (obstacles[i].y > canvas.height + 50) {
+            obstacles.splice(i, 1);
+        }
+    }
+
+    if (score >= 500) {
+        winGame();
+    }
+}
+
+function drawGridBackground() {
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    let offset = (frameCount * gameSpeed) % 40;
+    for (let y = offset; y < canvas.height; y += 40) {
+        ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+    }
+    for (let x = 0; x < canvas.width; x += 60) {
+        ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+    }
+}
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    drawGridBackground();
+
+    // Draw Rogue AI Target
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = '#f43f5e';
+    ctx.fillStyle = '#f43f5e';
+    ctx.beginPath(); ctx.arc(rogueAI.x, rogueAI.y, rogueAI.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 10px sans-serif';
+    ctx.fillText('ROGUE', rogueAI.x - 18, rogueAI.y + 4);
+
+    // Draw Interposer (Player)
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = '#38bdf8';
+    ctx.fillStyle = '#38bdf8';
+    ctx.beginPath(); ctx.arc(player.x, player.y, player.radius, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+
+    // Draw Hazards / Hallucinations
+    obstacles.forEach(obs => {
+        let ox = lanes[obs.lane];
+        let oy = obs.y;
+        ctx.save();
+        if (obs.type === 'glitch') {
+            ctx.fillStyle = '#e11d48';
+            ctx.fillRect(ox - 16, oy - 16, 32, 32);
+            ctx.fillStyle = '#fff'; ctx.font = '10px sans-serif'; ctx.fillText('TRAP', ox - 13, oy + 4);
+        } else if (obs.type === 'scrambler') {
+            ctx.fillStyle = '#facc15';
+            ctx.beginPath(); ctx.arc(ox, oy, 16, 0, Math.PI * 2); ctx.fill();
+            ctx.fillStyle = '#0f172a'; ctx.font = 'bold 9px sans-serif'; ctx.fillText('SCRAM', ox - 16, oy + 3);
+        } else {
+            // Hallucination (ghostly transparency)
+            ctx.fillStyle = 'rgba(100, 116, 139, 0.4)';
+            ctx.fillRect(ox - 15, oy - 15, 30, 30);
+            ctx.fillStyle = 'rgba(255,255,255,0.5)'; ctx.font = '9px sans-serif'; ctx.fillText('FAKE', ox - 12, oy + 3);
+        }
+        ctx.restore();
+    });
+
+    if (Date.now() < controlScrambledUntil) {
+        ctx.fillStyle = '#facc15';
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillText('WARNING: CONTROLS SCRAMBled!', 110, 30);
+    }
+}
+
+function gameOver() {
+    isPlaying = false;
+    document.getElementById('finalScoreText').innerText = "The rogue AI breached the network perimeter.";
+    gameOverScreen.classList.remove('hidden');
+}
+
+function winGame() {
+    isPlaying = false;
+    document.getElementById('finalScoreText').innerText = "Success! You successfully contained the rogue AI.";
+    gameOverScreen.classList.remove('hidden');
+}
+
+function loop() {
+    update();
+    draw();
+    if (isPlaying) requestAnimationFrame(loop);
+}
+</script>
+
+</body>
+</html>
